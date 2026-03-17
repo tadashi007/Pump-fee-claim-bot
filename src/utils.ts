@@ -35,6 +35,7 @@ export interface AppConfig {
   dataFile: string;
   bootstrapExisting: boolean;
   telegramBotToken?: string;
+  telegramChatIds: string[];
   telegramChatId?: string;
   githubToken?: string;
   alertFilters: AlertFilters;
@@ -83,6 +84,8 @@ export function getConfig(): AppConfig {
   const rpcWsUrl = process.env.RPC_WS_URL?.trim() || deriveWsUrl(rpcHttpUrl);
   const commitment = parseCommitment(process.env.COMMITMENT);
   const dataFile = process.env.DATA_FILE?.trim() || "./data/pump-fee-monitor.json";
+  const telegramChatId = emptyToUndefined(process.env.TELEGRAM_CHAT_ID);
+  const telegramChatIds = parseTelegramChatIds(process.env.TELEGRAM_CHAT_IDS, telegramChatId);
 
   return {
     rpcHttpUrl,
@@ -91,7 +94,8 @@ export function getConfig(): AppConfig {
     dataFile,
     bootstrapExisting: parseBoolean(process.env.BOOTSTRAP_EXISTING, true),
     telegramBotToken: emptyToUndefined(process.env.TELEGRAM_BOT_TOKEN),
-    telegramChatId: emptyToUndefined(process.env.TELEGRAM_CHAT_ID),
+    telegramChatIds,
+    telegramChatId,
     githubToken: emptyToUndefined(process.env.GITHUB_TOKEN),
     alertFilters: {
       eventTypes: parseAlertEventTypes(process.env.ALERT_EVENT_TYPES),
@@ -239,6 +243,14 @@ export function parseSolToLamports(value: string | undefined): bigint | undefine
 export function emptyToUndefined(value?: string): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
+}
+
+export function parseTelegramChatIds(value: string | undefined, fallback?: string): string[] {
+  const parsed = parseCsv(value);
+  if (parsed.length > 0) {
+    return uniqueStrings(parsed);
+  }
+  return fallback ? [fallback] : [];
 }
 
 export function toPublicKeyString(value: unknown): string {

@@ -8,8 +8,8 @@ import {
   AlertService,
   buildCreateAlertDetails,
   buildUpdateAlertDetails,
-  copyableField,
-  shareholderDetailLines,
+  compactShareholderDetailLines,
+  textField,
 } from "./alerts";
 import {
   decodeSharingConfigAccount,
@@ -104,7 +104,7 @@ class PumpFeeMonitoringBot {
   private alertFilters = cloneAlertFilters(this.config.alertFilters);
   private readonly alerts = new AlertService(
     this.config.telegramBotToken,
-    this.config.telegramChatId,
+    this.config.telegramChatIds,
   );
   private readonly githubProfiles = new GitHubProfileService(
     this.storage,
@@ -194,19 +194,7 @@ class PumpFeeMonitoringBot {
     console.log("Starting fee-program log subscription...");
     this.eventListener.start();
 
-    await this.alerts.sendStartupNotice(
-      [
-        `HTTP RPC: ${this.config.rpcHttpUrl}`,
-        `WS RPC: ${this.config.rpcWsUrl}`,
-        `Data file: ${this.config.dataFile}`,
-        `Bootstrapped tokens: ${this.storage.getAllTokens().length}`,
-        `Watching social PDAs: ${this.storage.getAllSocialPdas().length}`,
-        ...describeAlertFilters(this.alertFilters),
-        ...(this.config.telegramBotToken && this.config.telegramChatId
-          ? ["Telegram control: /settings and /filters enabled"]
-          : []),
-      ].join("\n"),
-    );
+    await this.alerts.sendStartupNotice("");
 
     this.telegramControl.start();
 
@@ -410,9 +398,9 @@ class PumpFeeMonitoringBot {
         signature: event.signature,
         timestamp: event.timestamp,
         details: [
-          copyableField("Sharing Config", event.sharingConfig),
-          copyableField("Old Admin", event.oldAdmin),
-          copyableField("New Admin", event.newAdmin),
+          textField("⚙️ Config", event.sharingConfig),
+          textField("👤 Old Admin", event.oldAdmin),
+          textField("👤 New Admin", event.newAdmin),
         ],
       });
     }
@@ -445,8 +433,8 @@ class PumpFeeMonitoringBot {
         signature: event.signature,
         timestamp: event.timestamp,
         details: [
-          copyableField("Sharing Config", event.sharingConfig),
-          copyableField("Admin", event.admin),
+          textField("⚙️ Config", event.sharingConfig),
+          textField("👤 Admin", event.admin),
         ],
       });
     }
@@ -481,10 +469,10 @@ class PumpFeeMonitoringBot {
         signature: event.signature,
         timestamp: event.timestamp,
         details: [
-          copyableField("Sharing Config", event.sharingConfig),
-          copyableField("Old Admin", event.oldAdmin),
-          copyableField("New Admin", event.newAdmin),
-          ...shareholderDetailLines("New Shareholders", enrichedShareholders),
+          textField("⚙️ Config", event.sharingConfig),
+          textField("👤 Old Admin", event.oldAdmin),
+          textField("👤 New Admin", event.newAdmin),
+          ...compactShareholderDetailLines("👥 Recipients", enrichedShareholders),
         ],
       });
     }

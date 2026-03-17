@@ -37,7 +37,8 @@ cp .env.example .env
 - `RPC_HTTP_URL`
 - `RPC_WS_URL`
 - `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_CHAT_ID`
+- `TELEGRAM_CHAT_ID` for a single alert destination and Telegram control commands
+- `TELEGRAM_CHAT_IDS` optional, comma-separated alert destinations for broadcasting to multiple groups/channels
 - `GITHUB_TOKEN` optional, for enriching GitHub social recipients with profile details and avoiding low anonymous GitHub API rate limits
 
 ## Alert Filters
@@ -68,6 +69,7 @@ ALERT_MINT_BLOCKLIST=
 ## Telegram Commands
 
 If `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set, the bot also listens for `/filters` commands in that chat and persists the changes locally.
+If `TELEGRAM_CHAT_IDS` is set, alerts are broadcast to all listed chats. Control commands still stay bound to the single `TELEGRAM_CHAT_ID`.
 
 Examples:
 
