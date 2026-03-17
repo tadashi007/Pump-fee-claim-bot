@@ -126,6 +126,7 @@ export class AlertService {
     }
 
     const failures: string[] = [];
+    let successCount = 0;
     for (const chatId of this.telegramChatIds) {
       const response = await fetch(
         `https://api.telegram.org/bot${this.telegramBotToken}/sendMessage`,
@@ -147,11 +148,18 @@ export class AlertService {
       if (!response.ok) {
         const body = await response.text();
         failures.push(`${chatId}: ${response.status} ${body}`);
+        continue;
       }
+
+      successCount += 1;
+    }
+
+    if (successCount === 0 && failures.length > 0) {
+      throw new Error(`Telegram sendMessage failed for ${failures.join(" | ")}`);
     }
 
     if (failures.length > 0) {
-      throw new Error(`Telegram sendMessage failed for ${failures.join(" | ")}`);
+      console.warn(`Telegram sendMessage partial failure for ${failures.join(" | ")}`);
     }
   }
 }

@@ -1,22 +1,43 @@
 # Pump.fun Fee Monitor Bot
 
-TypeScript monitoring bot for the Pump.fun fee-sharing program. It watches governance events over Solana WebSockets, discovers tokens with fee sharing enabled, tracks social recipient PDAs, and detects social fee claims through PDA lamport balance drops.
+TypeScript monitoring bot for the Pump.fun fee-sharing program. It watches governance events over Solana WebSockets, tracks social recipient PDAs, detects claim activity from balance deltas, and sends Telegram alerts.
 
-## Features
+## What It Monitors
 
-- Watches `pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ` with `connection.onLogs`
-- Decodes Pump fee-sharing events with Anchor `EventParser`
-- Detects:
-  - fee-sharing config creation
-  - fee-share updates
-  - authority transfer
-  - authority revoke / permanent lock
+- Program: `pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ`
+- Event source: Solana `onLogs` + account subscriptions
+- Governance events:
+  - fee-sharing config created
+  - fee-share updated
+  - authority transferred
+  - authority revoked (locked)
   - config reset
-  - social fee PDA creation
-  - social recipient claims via `onAccountChange` balance deltas
-- Persists tokens, shareholders, social PDAs, balances, and authority history to JSON
-- Sends alerts to Telegram
-- Bootstraps existing `SharingConfig` accounts on startup so watchers survive restarts
+- Social events:
+  - social fee PDA created
+  - social fee claim inferred from lamport balance decrease
+
+## How It Works
+
+1. Startup
+   - Loads persisted state from `DATA_FILE`
+   - Optionally bootstraps existing sharing configs from chain (`BOOTSTRAP_EXISTING=true`)
+   - Starts social PDA account watchers
+   - Starts fee-program log listener
+2. Runtime decoding and state updates
+   - Decodes program logs via Anchor `EventParser`
+   - Maintains local token/social-PDA index in JSON storage
+   - Links mints to social PDAs and tracks observed claim counts
+3. Claim detection
+   - Watches social PDA lamport balance changes via `onAccountChange`
+   - Marks a claim when current balance drops below previous balance
+   - Enriches with recipient/signature if a matching claim log is available in slot proximity
+4. Alerting
+   - Applies runtime filters (event type, platform, mint allow/block list, minimum claim size)
+   - Sends compact Telegram alerts with copyable token CA and action buttons
+   - Broadcasts alerts to `TELEGRAM_CHAT_IDS` (comma-separated) or fallback `TELEGRAM_CHAT_ID`
+5. Control path
+   - `/settings` and `/filters` are accepted only in `TELEGRAM_CHAT_ID`
+   - Control updates are persisted to local storage and survive restarts
 
 ## Setup
 
@@ -26,52 +47,57 @@ TypeScript monitoring bot for the Pump.fun fee-sharing program. It watches gover
 npm install
 ```
 
-2. Create your env file:
+2. Create env file:
 
 ```bash
 cp .env.example .env
 ```
 
-3. Set at least:
+3. Configure required values:
 
 - `RPC_HTTP_URL`
 - `RPC_WS_URL`
 - `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_CHAT_ID` for a single alert destination and Telegram control commands
-- `TELEGRAM_CHAT_IDS` optional, comma-separated alert destinations for broadcasting to multiple groups/channels
-- `GITHUB_TOKEN` optional, for enriching GitHub social recipients with profile details and avoiding low anonymous GitHub API rate limits
+- `TELEGRAM_CHAT_IDS` for alert destinations (`-100...,-100...`)
+- `TELEGRAM_CHAT_ID` for control chat (`/settings`, `/filters`)
+
+Optional:
+
+- `GITHUB_TOKEN` for GitHub profile enrichment with higher rate limits
+- `ALERT_EVENT_TYPES`, `ALERT_PLATFORMS`, `ALERT_MINT_ALLOWLIST`, `ALERT_MINT_BLOCKLIST`, `ALERT_MIN_CLAIM_SOL`
+
+## Telegram Routing Model
+
+- Alerts:
+  - Sent to all chat IDs in `TELEGRAM_CHAT_IDS`
+  - If `TELEGRAM_CHAT_IDS` is empty, falls back to single `TELEGRAM_CHAT_ID`
+- Control:
+  - Only `TELEGRAM_CHAT_ID` can use `/settings` and `/filters`
+  - Intended for private DM or a private admin group
+- Channel IDs:
+  - Must usually be in `-100...` format
 
 ## Alert Filters
 
-All filters are optional. They only suppress alerts; the bot still monitors and stores matching on-chain activity.
+All filters are suppressive only. Monitoring and storage still continue.
 
-- `ALERT_EVENT_TYPES`
-  Comma-separated: `create,update,transfer,revoke,reset,claim`
-- `ALERT_PLATFORMS`
-  Comma-separated social claim platforms: `github,x,pump`
-- `ALERT_MINT_ALLOWLIST`
-  Comma-separated mint addresses. If set, only those mints alert.
-- `ALERT_MINT_BLOCKLIST`
-  Comma-separated mint addresses to suppress.
-- `ALERT_MIN_CLAIM_SOL`
-  Minimum social claim size to alert, in SOL. Example: `0.5`
+- `ALERT_EVENT_TYPES`: `create,update,transfer,revoke,reset,claim`
+- `ALERT_PLATFORMS`: `github,x,pump`
+- `ALERT_MINT_ALLOWLIST`: comma-separated mint addresses
+- `ALERT_MINT_BLOCKLIST`: comma-separated mint addresses
+- `ALERT_MIN_CLAIM_SOL`: minimum claim size in SOL (example `0.5`)
 
 Example:
 
 ```env
-ALERT_EVENT_TYPES=create,revoke,claim
+ALERT_EVENT_TYPES=claim,revoke
 ALERT_PLATFORMS=github
-ALERT_MIN_CLAIM_SOL=0.25
+ALERT_MIN_CLAIM_SOL=0.5
 ALERT_MINT_ALLOWLIST=
 ALERT_MINT_BLOCKLIST=
 ```
 
 ## Telegram Commands
-
-If `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are set, the bot also listens for `/filters` commands in that chat and persists the changes locally.
-If `TELEGRAM_CHAT_IDS` is set, alerts are broadcast to all listed chats. Control commands still stay bound to the single `TELEGRAM_CHAT_ID`.
-
-Examples:
 
 ```text
 /start
@@ -82,11 +108,41 @@ Examples:
 /filters events claim,revoke
 /filters platforms github
 /filters min_claim 0.5
-/filters mint_allow add J5qhCKNf9f9BWN9YcNoyvowKSwboLHhi8WJAfAEhBAGS
-/filters mint_block add J5qhCKNf9f9BWN9YcNoyvowKSwboLHhi8WJAfAEhBAGS
+/filters mint_allow add <mint>
+/filters mint_block add <mint>
 ```
 
-`/settings` opens a button-based Telegram control panel for the supported fee-sharing alerts. `Bonded` and `Migrated` are shown as unavailable placeholders until those monitors are implemented.
+## Safety Audit (2026-03-17)
+
+Scope:
+
+- Runtime secret handling
+- Telegram trust boundaries
+- Failure behavior
+- Dependency vulnerabilities
+
+Findings:
+
+- Dependency scan (`npm audit --omit=dev`): 0 vulnerabilities
+- Reliability fix applied: Telegram alert broadcast now tolerates partial delivery failure
+  - If one chat ID fails but at least one succeeds, bot continues running and logs a warning
+  - If all destinations fail, alert send still returns an error
+- Control chat boundary is enforced by exact `chat.id` match
+- HTML content is escaped before Telegram send (reduces formatting/script-injection risk in messages)
+
+Remaining operational risks to manage:
+
+- `.env` contains high-value secrets (RPC key, Telegram bot token). Treat as sensitive and rotate on leak.
+- JSON data store is plaintext local state; avoid running on shared hosts without OS-level access controls.
+- Alert channels are public-facing outputs. Keep control commands in a private chat (`TELEGRAM_CHAT_ID`) only.
+
+Recommended hardening:
+
+1. Use separate chats for alerts and control (`TELEGRAM_CHAT_IDS` vs `TELEGRAM_CHAT_ID`).
+2. Restrict bot admin rights in channels to only what is needed (`Post Messages`).
+3. Rotate `TELEGRAM_BOT_TOKEN` and RPC keys regularly.
+4. Keep `ALERT_MIN_CLAIM_SOL` non-zero in production to reduce noise/spam.
+5. Run `npm audit --omit=dev` periodically.
 
 ## Run
 
@@ -103,6 +159,5 @@ npm run check
 
 ## Notes
 
-- The bot vendors the official Pump fee-sharing IDL at [idl/pump_fee_sharing.json](/Users/abhijithvs/Pump fee claim bot/idl/pump_fee_sharing.json).
-- Claim detection is driven by social PDA balance deltas. When a matching `SocialFeePdaClaimed` log is available in the same slot, the bot enriches the alert with the recipient wallet without decoding instructions.
-- A single social PDA can appear in multiple token configs. Claim alerts therefore include all related mints currently linked to that PDA.
+- IDL source: [idl/pump_fee_sharing.json](/Users/abhijithvs/Pump fee claim bot/idl/pump_fee_sharing.json)
+- Claim attribution can be ambiguous when one social PDA is linked to multiple mints. In those cases alerts show a token-candidate preview, not a guaranteed exact mint.
